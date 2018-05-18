@@ -1,0 +1,3 @@
+[submodule "renderdoc/3rdparty/fossilize"]
+	path = renderdoc/3rdparty/fossilize
+	url = git://github.com/Themaister/fossilize

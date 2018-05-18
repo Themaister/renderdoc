@@ -4,7 +4,10 @@ set(RDOC_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(RDOC_DEFINITIONS PRIVATE -DRENDERDOC_EXPORTS)
 set(RDOC_INCLUDES
     PRIVATE ${RDOC_SOURCE_DIR}
-    PRIVATE ${RDOC_SOURCE_DIR}/3rdparty)
+    PRIVATE ${RDOC_SOURCE_DIR}/3rdparty
+    PRIVATE ${RDOC_SOURCE_DIR}/driver/vulkan/official
+    PRIVATE ${RDOC_SOURCE_DIR}/3rdparty/fossilize/rapidjson/include
+    PRIVATE ${RDOC_SOURCE_DIR}/3rdparty/fossilize/)
 set(RDOC_LIBRARIES)
 
 if(ANDROID)
@@ -147,6 +150,7 @@ set(sources
     serialise/rdcfile.h
     serialise/codecs/xml_codec.cpp
     serialise/codecs/chrome_json_codec.cpp
+    serialise/codecs/fossilize_codec.cpp
     serialise/comp_io_tests.cpp
     serialise/serialiser_tests.cpp
     serialise/streamio_tests.cpp
@@ -203,7 +207,11 @@ set(sources
     3rdparty/tinyexr/tinyexr.cpp
     3rdparty/tinyexr/tinyexr.h
     3rdparty/tinyfiledialogs/tinyfiledialogs.c
-    3rdparty/tinyfiledialogs/tinyfiledialogs.h)
+    3rdparty/tinyfiledialogs/tinyfiledialogs.h
+    3rdparty/fossilize/fossilize.cpp
+    3rdparty/fossilize/fossilize.hpp
+    3rdparty/fossilize/varint.cpp
+    3rdparty/fossilize/varint.hpp)
 
 if(ANDROID)
     list(APPEND sources
