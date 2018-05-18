@@ -34,7 +34,7 @@ using namespace Fossilize;
 #define GET_SIZE() VkDeviceSize((*args++)->data.basic.u)
 #define GET_F32() float((*args++)->data.basic.d)
 #define GET_ENUM(T) static_cast<T>((*args++)->data.basic.u)
-#define GET_HANDLE(t) (T)((*args++)->data.basic.u)
+#define GET_HANDLE(T) (T)((*args++)->data.basic.u)
 #define GET_ARRAY() (*args++)->data.children.data()
 
 static bool serialise_sampler(StateRecorder &recorder, const SDObject *create_info, const SDObject *id)
@@ -195,6 +195,43 @@ static bool serialise_shader_module(StateRecorder &recorder, const StructuredBuf
 	return true;
 }
 
+static bool serialise_compute_pipeline(StateRecorder &recorder, const StructuredBufferList &buffers,
+                                       const SDObject *create_info, const SDObject *id)
+{
+	const SDObject * const *args = create_info->data.children.data();
+
+	VkComputePipelineCreateInfo info = {};
+	info.sType = GET_ENUM(VkStructureType);
+	if ((*args++)->type.basetype != SDBasic::Null)
+		return false;
+	info.flags = GET_U32();
+
+	{
+		const SDObject * const *stage = GET_ARRAY();
+		const SDObject * const *args = stage;
+		info.stage.sType = GET_ENUM(VkStructureType);
+		if ((*args++)->type.basetype != SDBasic::Null)
+			return false;
+		info.stage.flags = GET_U32();
+		info.stage.stage = GET_ENUM(VkShaderStageFlagBits);
+		info.stage.module = GET_HANDLE(VkShaderModule);
+		info.stage.pName = (*args++)->data.str.c_str();
+
+		// TODO: spec info
+		if ((*args)->type.basetype != SDBasic::Null)
+			return false;
+	}
+
+	info.layout = GET_HANDLE(VkPipelineLayout);
+	info.basePipelineHandle = GET_HANDLE(VkPipeline);
+	info.basePipelineIndex = GET_U32();
+
+	unsigned index = recorder.register_compute_pipeline(
+			Hashing::compute_hash_compute_pipeline(recorder, info), info);
+	recorder.set_compute_pipeline_handle(index, (VkPipeline)id->data.basic.u);
+	return true;
+}
+
 ReplayStatus export_fossilize(const char *filename, const RDCFile &rdc, const SDFile &structData,
                               RENDERDOC_ProgressCallback progress)
 {
@@ -228,6 +265,13 @@ ReplayStatus export_fossilize(const char *filename, const RDCFile &rdc, const SD
 			if (!serialise_shader_module(recorder, structData.buffers,
 			                             chunk->data.children[1],
 			                             chunk->data.children[3]))
+				return ReplayStatus::APIIncompatibleVersion;
+		}
+		else if (chunk->name == "vkCreateComputePipelines")
+		{
+			if (!serialise_compute_pipeline(recorder, structData.buffers,
+			                                chunk->data.children[3],
+			                                chunk->data.children[5]))
 				return ReplayStatus::APIIncompatibleVersion;
 		}
 	}
