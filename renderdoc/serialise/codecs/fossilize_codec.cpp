@@ -28,9 +28,75 @@
 #include "serialise/rdcfile.h"
 #include "fossilize/fossilize.hpp"
 
+using namespace Fossilize;
+
+#define GET_U32() uint32_t((*args++)->data.basic.u)
+#define GET_F32() float((*args++)->data.basic.d)
+#define GET_ENUM(T) static_cast<T>((*args++)->data.basic.u)
+#define GET_HANDLE(t) (T)((*args++)->data.basic.u)
+
+static bool serialise_sampler(StateRecorder &recorder, const SDObject *create_info, const SDObject *id)
+{
+	const SDObject * const *args = create_info->data.children.data();
+	VkSamplerCreateInfo info = {};
+	info.sType = GET_ENUM(VkStructureType);
+	if ((*args++)->type.basetype != SDBasic::Null)
+		return false;
+	info.flags = GET_U32();
+	info.magFilter = GET_ENUM(VkFilter);
+	info.minFilter = GET_ENUM(VkFilter);
+	info.mipmapMode = GET_ENUM(VkSamplerMipmapMode);
+	info.addressModeU = GET_ENUM(VkSamplerAddressMode);
+	info.addressModeV = GET_ENUM(VkSamplerAddressMode);
+	info.addressModeW = GET_ENUM(VkSamplerAddressMode);
+	info.mipLodBias = GET_F32();
+	info.anisotropyEnable = GET_U32();
+	info.maxAnisotropy = GET_F32();
+	info.compareEnable = GET_U32();
+	info.compareOp = GET_ENUM(VkCompareOp);
+	info.minLod = GET_F32();
+	info.maxLod = GET_F32();
+	info.borderColor = GET_ENUM(VkBorderColor);
+	info.unnormalizedCoordinates = GET_U32();
+
+	unsigned index = recorder.register_sampler(Hashing::compute_hash_sampler(recorder, info), info);
+	recorder.set_sampler_handle(index, (VkSampler)id->data.basic.u);
+
+	return true;
+}
+
 ReplayStatus export_fossilize(const char *filename, const RDCFile &rdc, const SDFile &structData,
                               RENDERDOC_ProgressCallback progress)
 {
+	if (rdc.GetDriver() != RDCDriver::Vulkan)
+		return ReplayStatus::APIIncompatibleVersion;
+	StateRecorder recorder;
+
+	for (SDChunk *chunk : structData.chunks)
+	{
+		if (chunk->name == "vkCreateSampler")
+		{
+			if (!serialise_sampler(recorder, chunk->data.children[1], chunk->data.children[3]))
+				return ReplayStatus::APIIncompatibleVersion;
+		}
+		else if (chunk->name == "vkCreateDescriptorSetLayout")
+		{
+
+		}
+	}
+
+	if (progress)
+		progress(0.1f);
+
+	vector<uint8_t> serialized = recorder.serialize();
+
+	FILE *file = FileIO::fopen(filename, "wb");
+	if (!file)
+		return ReplayStatus::FileIOFailed;
+
+	FileIO::fwrite(serialized.data(), 1, serialized.size(), file);
+	FileIO::fclose(file);
+
 	if (progress)
 		progress(1.0f);
 	return ReplayStatus::Succeeded;
