@@ -31,6 +31,7 @@
 using namespace Fossilize;
 
 #define GET_U32() uint32_t((*args++)->data.basic.u)
+#define GET_SIZE() VkDeviceSize((*args++)->data.basic.u)
 #define GET_F32() float((*args++)->data.basic.d)
 #define GET_ENUM(T) static_cast<T>((*args++)->data.basic.u)
 #define GET_HANDLE(t) (T)((*args++)->data.basic.u)
@@ -66,7 +67,8 @@ static bool serialise_sampler(StateRecorder &recorder, const SDObject *create_in
 	return true;
 }
 
-static void serialise_descriptor_set_binding(VkDescriptorSetLayoutBinding &binding,
+static void serialise_descriptor_set_binding(StateRecorder &recorder,
+                                             VkDescriptorSetLayoutBinding &binding,
                                              const SDObject *arg)
 {
 	const SDObject * const *args = arg->data.children.data();
@@ -76,10 +78,10 @@ static void serialise_descriptor_set_binding(VkDescriptorSetLayoutBinding &bindi
 	binding.stageFlags = GET_U32();
 
 	const SDObject *immutable = *args;
-	vector<VkSampler> immutable_samplers(binding.descriptorCount);
+	VkSampler *immutable_samplers = recorder.get_allocator().allocate_n<VkSampler>(binding.descriptorCount);
 	if (!immutable->data.children.empty())
 	{
-		binding.pImmutableSamplers = immutable_samplers.data();
+		binding.pImmutableSamplers = immutable_samplers;
 		const SDObject * const *handles = immutable->data.children.data();
 		for (uint32_t i = 0; i < binding.descriptorCount; i++)
 			immutable_samplers[i] = (VkSampler)handles[i]->data.basic.u;
@@ -88,12 +90,13 @@ static void serialise_descriptor_set_binding(VkDescriptorSetLayoutBinding &bindi
 		binding.pImmutableSamplers = NULL;
 }
 
-static bool serialise_descriptor_set_bindings(VkDescriptorSetLayoutBinding *binding, size_t count,
+static bool serialise_descriptor_set_bindings(StateRecorder &recorder,
+                                              VkDescriptorSetLayoutBinding *binding, size_t count,
                                               const SDObject *arg)
 {
 	const SDObject * const *args = arg->data.children.data();
 	for (size_t i = 0; i < count; i++)
-		serialise_descriptor_set_binding(binding[i], *args++);
+		serialise_descriptor_set_binding(recorder, binding[i], *args++);
 
 	return true;
 }
@@ -110,11 +113,12 @@ static bool serialise_descriptor_set_layout(StateRecorder &recorder, const SDObj
 	info.flags = GET_U32();
 	info.bindingCount = GET_U32();
 
-	vector<VkDescriptorSetLayoutBinding> bindings(info.bindingCount);
+	VkDescriptorSetLayoutBinding *bindings =
+			recorder.get_allocator().allocate_n<VkDescriptorSetLayoutBinding>(info.bindingCount);
 	if (info.bindingCount)
 	{
-		info.pBindings = bindings.data();
-		serialise_descriptor_set_bindings(bindings.data(), bindings.size(), *args++);
+		info.pBindings = bindings;
+		serialise_descriptor_set_bindings(recorder, bindings, info.bindingCount, *args++);
 	}
 
 	unsigned index = recorder.register_descriptor_set_layout(
@@ -135,11 +139,11 @@ static bool serialise_pipeline_layout(StateRecorder &recorder, const SDObject *c
 	info.flags = GET_U32();
 	info.setLayoutCount = GET_U32();
 
-	vector<VkDescriptorSetLayout> layouts(info.setLayoutCount);
+	VkDescriptorSetLayout *layouts = recorder.get_allocator().allocate_n<VkDescriptorSetLayout>(info.setLayoutCount);
 	const SDObject * const *set_layouts = GET_ARRAY();
 	if (info.setLayoutCount)
 	{
-		info.pSetLayouts = layouts.data();
+		info.pSetLayouts = layouts;
 		for (uint32_t i = 0; i < info.setLayoutCount; i++)
 			layouts[i] = (VkDescriptorSetLayout)set_layouts[i]->data.basic.u;
 	}
@@ -148,10 +152,10 @@ static bool serialise_pipeline_layout(StateRecorder &recorder, const SDObject *c
 
 	info.pushConstantRangeCount = GET_U32();
 	const SDObject * const *ranges = GET_ARRAY();
-	vector<VkPushConstantRange> push_ranges(info.pushConstantRangeCount);
+	VkPushConstantRange *push_ranges = recorder.get_allocator().allocate_n<VkPushConstantRange>(info.pushConstantRangeCount);
 	if (info.pushConstantRangeCount)
 	{
-		info.pPushConstantRanges = push_ranges.data();
+		info.pPushConstantRanges = push_ranges;
 		for (uint32_t i = 0; i < info.pushConstantRangeCount; i++)
 		{
 			VkPushConstantRange &r = push_ranges[i];
@@ -165,6 +169,29 @@ static bool serialise_pipeline_layout(StateRecorder &recorder, const SDObject *c
 	unsigned index = recorder.register_pipeline_layout(
 			Hashing::compute_hash_pipeline_layout(recorder, info), info);
 	recorder.set_pipeline_layout_handle(index, (VkPipelineLayout)id->data.basic.u);
+	return true;
+}
+
+static bool serialise_shader_module(StateRecorder &recorder, const StructuredBufferList &buffers,
+                                    const SDObject *create_info, const SDObject *id)
+{
+	const SDObject * const *args = create_info->data.children.data();
+	VkShaderModuleCreateInfo info = {};
+
+	info.sType = GET_ENUM(VkStructureType);
+	if ((*args++)->type.basetype != SDBasic::Null)
+		return false;
+	info.flags = GET_U32();
+	info.codeSize = GET_SIZE();
+
+	uint32_t buffer_index = GET_U32();
+	info.pCode = reinterpret_cast<const uint32_t *>(buffers[buffer_index]->data());
+	if (buffers[buffer_index]->size() != info.codeSize)
+		return false;
+
+	unsigned index = recorder.register_shader_module(
+			Hashing::compute_hash_shader_module(recorder, info), info);
+	recorder.set_shader_module_handle(index, (VkShaderModule)id->data.basic.u);
 	return true;
 }
 
@@ -196,10 +223,14 @@ ReplayStatus export_fossilize(const char *filename, const RDCFile &rdc, const SD
 			                               chunk->data.children[3]))
 				return ReplayStatus::APIIncompatibleVersion;
 		}
+		else if (chunk->name == "vkCreateShaderModule")
+		{
+			if (!serialise_shader_module(recorder, structData.buffers,
+			                             chunk->data.children[1],
+			                             chunk->data.children[3]))
+				return ReplayStatus::APIIncompatibleVersion;
+		}
 	}
-
-	if (progress)
-		progress(0.1f);
 
 	vector<uint8_t> serialized = recorder.serialize();
 
@@ -220,5 +251,5 @@ static ConversionRegistration FossilizeConversionRegistration(
     {
         "fossilize.json", "Fossilize state exporter",
         R"(Exports Vulkan state for various persistent objects.)",
-        false,
+        true,
     });
