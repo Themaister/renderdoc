@@ -278,6 +278,153 @@ static bool serialise_compute_pipeline(StateRecorder &recorder, const Structured
 	return true;
 }
 
+static bool serialise_render_pass(StateRecorder &recorder, const SDObject *create_info,
+                                  const SDObject *id)
+{
+	const SDObject * const *args = create_info->data.children.data();
+	VkRenderPassCreateInfo info = {};
+
+	info.sType = GET_ENUM(VkStructureType);
+	if ((*args++)->type.basetype != SDBasic::Null)
+		return false;
+	info.flags = GET_U32();
+	info.attachmentCount = GET_U32();
+	const SDObject * const *att = GET_ARRAY();
+	info.subpassCount = GET_U32();
+	const SDObject * const *sub = GET_ARRAY();
+	info.dependencyCount = GET_U32();
+	const SDObject * const *dep = GET_ARRAY();
+
+	if (info.attachmentCount)
+	{
+		VkAttachmentDescription *attachments =
+				recorder.get_allocator().allocate_n_cleared<VkAttachmentDescription>(info.attachmentCount);
+		info.pAttachments = attachments;
+		for (uint32_t i = 0; i < info.attachmentCount; i++)
+		{
+			const SDObject * const *a = att[i]->data.children.data();
+			attachments[i].flags = GET_U32_EXPLICIT(a);
+			attachments[i].format = GET_ENUM_EXPLICIT(a, VkFormat);
+			attachments[i].samples = GET_ENUM_EXPLICIT(a, VkSampleCountFlagBits);
+			attachments[i].loadOp = GET_ENUM_EXPLICIT(a, VkAttachmentLoadOp);
+			attachments[i].storeOp = GET_ENUM_EXPLICIT(a, VkAttachmentStoreOp);
+			attachments[i].stencilLoadOp = GET_ENUM_EXPLICIT(a, VkAttachmentLoadOp);
+			attachments[i].stencilStoreOp = GET_ENUM_EXPLICIT(a, VkAttachmentStoreOp);
+			attachments[i].initialLayout = GET_ENUM_EXPLICIT(a, VkImageLayout);
+			attachments[i].finalLayout = GET_ENUM_EXPLICIT(a, VkImageLayout);
+		}
+	}
+
+	if (info.subpassCount)
+	{
+		VkSubpassDescription *subpasses =
+				recorder.get_allocator().allocate_n_cleared<VkSubpassDescription>(info.subpassCount);
+		info.pSubpasses = subpasses;
+
+		for (uint32_t i = 0; i < info.subpassCount; i++)
+		{
+			const SDObject * const *s = sub[i]->data.children.data();
+			subpasses[i].flags = GET_U32_EXPLICIT(s);
+			subpasses[i].pipelineBindPoint = GET_ENUM_EXPLICIT(s, VkPipelineBindPoint);
+
+			subpasses[i].inputAttachmentCount = GET_U32_EXPLICIT(s);
+			const SDObject * const *inputs = GET_ARRAY_EXPLICIT(s);
+			subpasses[i].colorAttachmentCount = GET_U32_EXPLICIT(s);
+			const SDObject * const *colors = GET_ARRAY_EXPLICIT(s);
+
+			if ((*s)->data.children.size() != 0)
+			{
+				const SDObject * const *res = (*s)->data.children.data();
+				VkAttachmentReference *resolves =
+						recorder.get_allocator().allocate_n<VkAttachmentReference>(subpasses[i].colorAttachmentCount);
+				subpasses[i].pResolveAttachments = resolves;
+
+				for (uint32_t j = 0; j < subpasses[i].colorAttachmentCount; j++)
+				{
+					const SDObject * const *r = GET_ARRAY_EXPLICIT(res);
+					resolves[j].attachment = GET_U32_EXPLICIT(r);
+					resolves[j].layout = GET_ENUM_EXPLICIT(r, VkImageLayout);
+				}
+			}
+			s++;
+
+			if ((*s)->type.basetype != SDBasic::Null)
+			{
+				const SDObject * const *depth_stencil = (*s)->data.children.data();
+				VkAttachmentReference *ds =
+						recorder.get_allocator().allocate_cleared<VkAttachmentReference>();
+				subpasses[i].pDepthStencilAttachment = ds;
+
+				ds->attachment = GET_U32_EXPLICIT(depth_stencil);
+				ds->layout = GET_ENUM_EXPLICIT(depth_stencil, VkImageLayout);
+			}
+			s++;
+
+			subpasses[i].preserveAttachmentCount = GET_U32_EXPLICIT(s);
+			const SDObject * const *preserves = GET_ARRAY_EXPLICIT(s);
+
+			if (subpasses[i].inputAttachmentCount)
+			{
+				VkAttachmentReference *att =
+						recorder.get_allocator().allocate_n<VkAttachmentReference>(subpasses[i].inputAttachmentCount);
+				subpasses[i].pInputAttachments = att;
+				for (uint32_t j = 0; j < subpasses[i].inputAttachmentCount; j++)
+				{
+					const SDObject * const *i = GET_ARRAY_EXPLICIT(inputs);
+					att[j].attachment = GET_U32_EXPLICIT(i);
+					att[j].layout = GET_ENUM_EXPLICIT(i, VkImageLayout);
+				}
+			}
+
+			if (subpasses[i].colorAttachmentCount)
+			{
+				VkAttachmentReference *att =
+						recorder.get_allocator().allocate_n<VkAttachmentReference>(subpasses[i].colorAttachmentCount);
+				subpasses[i].pColorAttachments = att;
+				for (uint32_t j = 0; j < subpasses[i].colorAttachmentCount; j++)
+				{
+					const SDObject * const *c = GET_ARRAY_EXPLICIT(colors);
+					att[j].attachment = GET_U32_EXPLICIT(c);
+					att[j].layout = GET_ENUM_EXPLICIT(c, VkImageLayout);
+				}
+			}
+
+			if (subpasses[i].preserveAttachmentCount)
+			{
+				uint32_t *att =
+						recorder.get_allocator().allocate_n<uint32_t>(subpasses[i].preserveAttachmentCount);
+				subpasses[i].pPreserveAttachments = att;
+				for (uint32_t j = 0; j < subpasses[i].preserveAttachmentCount; j++)
+					att[j] = GET_U32_EXPLICIT(preserves);
+			}
+		}
+	}
+
+	if (info.dependencyCount)
+	{
+		VkSubpassDependency *deps =
+				recorder.get_allocator().allocate_n_cleared<VkSubpassDependency>(info.dependencyCount);
+		info.pDependencies = deps;
+
+		for (uint32_t i = 0; i < info.dependencyCount; i++)
+		{
+			const SDObject * const *d = dep[i]->data.children.data();
+			deps[i].srcSubpass = GET_U32_EXPLICIT(d);
+			deps[i].dstSubpass = GET_U32_EXPLICIT(d);
+			deps[i].srcStageMask = GET_U32_EXPLICIT(d);
+			deps[i].dstStageMask = GET_U32_EXPLICIT(d);
+			deps[i].srcAccessMask = GET_U32_EXPLICIT(d);
+			deps[i].dstAccessMask = GET_U32_EXPLICIT(d);
+			deps[i].dependencyFlags = GET_U32_EXPLICIT(d);
+		}
+	}
+
+	unsigned index = recorder.register_render_pass(
+			Hashing::compute_hash_render_pass(recorder, info), info);
+	recorder.set_render_pass_handle(index, (VkRenderPass)id->data.basic.u);
+	return true;
+}
+
 ReplayStatus export_fossilize(const char *filename, const RDCFile &rdc, const SDFile &structData,
                               RENDERDOC_ProgressCallback progress)
 {
@@ -318,6 +465,12 @@ ReplayStatus export_fossilize(const char *filename, const RDCFile &rdc, const SD
 			if (!serialise_compute_pipeline(recorder, structData.buffers,
 			                                chunk->data.children[3],
 			                                chunk->data.children[5]))
+				return ReplayStatus::APIIncompatibleVersion;
+		}
+		else if (chunk->name == "vkCreateRenderPass")
+		{
+			if (!serialise_render_pass(recorder, chunk->data.children[1],
+			                           chunk->data.children[3]))
 				return ReplayStatus::APIIncompatibleVersion;
 		}
 	}
