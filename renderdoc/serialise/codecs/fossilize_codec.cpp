@@ -30,6 +30,14 @@
 
 using namespace Fossilize;
 
+#define SKIP_IF(args, id) do { if ((*args)->name == #id) args++; } while(0)
+#define GET_U32_EXPLICIT(args) uint32_t((*args++)->data.basic.u)
+#define GET_SIZE_EXPLICIT(args) VkDeviceSize((*args++)->data.basic.u)
+#define GET_F32_EXPLICIT(args) float((*args++)->data.basic.d)
+#define GET_ENUM_EXPLICIT(args, T) static_cast<T>((*args++)->data.basic.u)
+#define GET_HANDLE_EXPLICIT(args, T) (T)((*args++)->data.basic.u)
+#define GET_ARRAY_EXPLICIT(args) (*args++)->data.children.data()
+
 #define GET_U32() uint32_t((*args++)->data.basic.u)
 #define GET_SIZE() VkDeviceSize((*args++)->data.basic.u)
 #define GET_F32() float((*args++)->data.basic.d)
@@ -159,10 +167,10 @@ static bool serialise_pipeline_layout(StateRecorder &recorder, const SDObject *c
 		for (uint32_t i = 0; i < info.pushConstantRangeCount; i++)
 		{
 			VkPushConstantRange &r = push_ranges[i];
-			const SDObject * const *args = ranges[i]->data.children.data();
-			r.stageFlags = GET_U32();
-			r.offset = GET_U32();
-			r.size = GET_U32();
+			const SDObject * const *range = ranges[i]->data.children.data();
+			r.stageFlags = GET_U32_EXPLICIT(range);
+			r.offset = GET_U32_EXPLICIT(range);
+			r.size = GET_U32_EXPLICIT(range);
 		}
 	}
 
@@ -195,6 +203,42 @@ static bool serialise_shader_module(StateRecorder &recorder, const StructuredBuf
 	return true;
 }
 
+static VkSpecializationInfo *clone_spec_info(StateRecorder &recorder,
+                                             const StructuredBufferList &buffers,
+                                             const SDObject *spec_info)
+{
+	VkSpecializationInfo *info = recorder.get_allocator().allocate_cleared<VkSpecializationInfo>();
+
+	const SDObject * const *args = spec_info->data.children.data();
+	info->mapEntryCount = GET_U32();
+	if (info->mapEntryCount)
+	{
+		VkSpecializationMapEntry *map_entries =
+				recorder.get_allocator().allocate_n_cleared<VkSpecializationMapEntry>(info->mapEntryCount);
+		info->pMapEntries = map_entries;
+
+		const SDObject * const *entries = GET_ARRAY();
+		for (uint32_t i = 0; i < info->mapEntryCount; i++)
+		{
+			const SDObject * const *map_entry = entries[i]->data.children.data();
+
+			// XXX: RenderDoc copy-paste bug in serialisation, but works fine.
+			map_entries[i].constantID = GET_U32_EXPLICIT(map_entry);
+			map_entries[i].offset = GET_U32_EXPLICIT(map_entry);
+			SKIP_IF(map_entry, constantID);
+			map_entries[i].size = GET_U32_EXPLICIT(map_entry);
+		}
+
+		info->dataSize = GET_U32();
+		uint32_t index = GET_U32();
+		if (buffers[index]->size() != info->dataSize)
+			return nullptr;
+		info->pData = buffers[index]->data();
+	}
+
+	return info;
+}
+
 static bool serialise_compute_pipeline(StateRecorder &recorder, const StructuredBufferList &buffers,
                                        const SDObject *create_info, const SDObject *id)
 {
@@ -208,18 +252,20 @@ static bool serialise_compute_pipeline(StateRecorder &recorder, const Structured
 
 	{
 		const SDObject * const *stage = GET_ARRAY();
-		const SDObject * const *args = stage;
-		info.stage.sType = GET_ENUM(VkStructureType);
-		if ((*args++)->type.basetype != SDBasic::Null)
+		info.stage.sType = GET_ENUM_EXPLICIT(stage, VkStructureType);
+		if ((*stage++)->type.basetype != SDBasic::Null)
 			return false;
-		info.stage.flags = GET_U32();
-		info.stage.stage = GET_ENUM(VkShaderStageFlagBits);
-		info.stage.module = GET_HANDLE(VkShaderModule);
-		info.stage.pName = (*args++)->data.str.c_str();
+		info.stage.flags = GET_U32_EXPLICIT(stage);
+		info.stage.stage = GET_ENUM_EXPLICIT(stage, VkShaderStageFlagBits);
+		info.stage.module = GET_HANDLE_EXPLICIT(stage, VkShaderModule);
+		info.stage.pName = (*stage++)->data.str.c_str();
 
-		// TODO: spec info
-		if ((*args)->type.basetype != SDBasic::Null)
-			return false;
+		if ((*stage)->type.basetype != SDBasic::Null)
+		{
+			info.stage.pSpecializationInfo = clone_spec_info(recorder, buffers, *stage);
+			if (!info.stage.pSpecializationInfo)
+				return false;
+		}
 	}
 
 	info.layout = GET_HANDLE(VkPipelineLayout);
