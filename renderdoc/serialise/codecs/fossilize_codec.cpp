@@ -507,7 +507,7 @@ static VkPipelineVertexInputStateCreateInfo *parse_vertex_input(StateRecorder &r
 
 		for (uint32_t i = 0; i < info->vertexAttributeDescriptionCount; i++)
 		{
-			const SDObject * const *attr = bindings[i]->begin();
+			const SDObject * const *attr = attribs[i]->begin();
 			attrs[i].location = GET_U32_EXPLICIT(attr);
 			attrs[i].binding = GET_U32_EXPLICIT(attr);
 			attrs[i].format = GET_ENUM_EXPLICIT(attr, VkFormat);
@@ -724,7 +724,7 @@ static VkPipelineColorBlendStateCreateInfo *parse_blend_state(StateRecorder &rec
 			attachments[i].srcAlphaBlendFactor = GET_ENUM_EXPLICIT(a, VkBlendFactor);
 			attachments[i].dstAlphaBlendFactor = GET_ENUM_EXPLICIT(a, VkBlendFactor);
 			attachments[i].alphaBlendOp = GET_ENUM_EXPLICIT(a, VkBlendOp);
-			attachments[i].colorWriteMask = GET_U32();
+			attachments[i].colorWriteMask = GET_U32_EXPLICIT(a);
 		}
 	}
 
@@ -765,6 +765,8 @@ static bool serialise_graphics_pipeline(StateRecorder &recorder, const Structure
 	VkGraphicsPipelineCreateInfo info = {};
 
 	info.sType = GET_ENUM(VkStructureType);
+	if (GET_NULLABLE_ARRAY())
+		return false;
 	info.flags = GET_U32();
 	info.stageCount = GET_U32();
 	const SDObject * const *stages = GET_ARRAY();
