@@ -476,7 +476,7 @@ TEST_CASE("Test OS-specific functions", "[osspecific]")
     Threading::ThreadHandle threads[numThreads];
     for(int threadID = 0; threadID < numThreads; threadID++)
     {
-      threads[threadID] = Threading::CreateThread([&values, numValues, threadID]() {
+      threads[threadID] = Threading::CreateThread([&values, threadID]() {
         for(int i = 0; i < numValues; i++)
           values[threadID * numValues + i] = threadID * 1000 + i;
       });
@@ -503,7 +503,7 @@ TEST_CASE("Test OS-specific functions", "[osspecific]")
     Threading::ThreadHandle threads[numThreads];
     for(int threadID = 0; threadID < numThreads; threadID++)
     {
-      threads[threadID] = Threading::CreateThread([&value, numValues]() {
+      threads[threadID] = Threading::CreateThread([&value]() {
         for(int i = 0; i < numValues; i++)
           Atomic::Inc32(&value);
       });

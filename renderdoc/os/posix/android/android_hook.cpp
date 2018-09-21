@@ -34,6 +34,7 @@
 #include <stddef.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <errno.h>
 #include <algorithm>
 #include <map>
 #include <set>

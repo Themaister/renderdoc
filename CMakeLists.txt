@@ -3,14 +3,14 @@ cmake_minimum_required(VERSION 2.8.12)
 # Configure some stuff that needs to be set really early
 if(BUILD_ANDROID)
     set(CMAKE_TOOLCHAIN_FILE
-        "${CMAKE_SOURCE_DIR}/util/android.toolchain.cmake"
+        $ENV{ANDROID_SDK}/ndk-bundle/build/cmake/android.toolchain.cmake
         CACHE STRING
         "The Android toolchain file")
 
     option(STRIP_ANDROID_LIBRARY "Strip the resulting android library" OFF)
 
     # Set same default API level for ANDROID_ABI=armeabi-v7a as for arm64-v8a.
-    set( ANDROID_DEFAULT_NDK_API_LEVEL_arm 21 )
+    set(ANDROID_NATIVE_API_LEVEL 21)
 
     # Default to arm32 if nothing is specified on the command line.
     # Options are {armeabi-v7a,arm64-v8a}
